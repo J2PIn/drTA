@@ -1,0 +1,124 @@
+import type { ChartRequest, ChartResponse, Candle, Series, Marker } from "./types";
+import { jsonResponse, badRequest, sortCandlesByTime } from "./utils";
+import { closesFromCandles, ema, sma, rsiFromCloses, bbands, macd } from "./indicators";
+
+function toLine(candles: Candle[], values: (number | null)[], name: string, panel: any = "price"): Series {
+  return {
+    type: "line",
+    name,
+    panel,
+    data: candles.map((c, i) => ({ t: c.t, value: values[i] ?? null })),
+  };
+}
+
+function validateCandles(candles: any): Candle[] {
+  if (!Array.isArray(candles) || candles.length < 2) throw new Error("candles must be an array with at least 2 points");
+  for (const c of candles) {
+    if (typeof c !== "object" || c == null) throw new Error("invalid candle object");
+    for (const k of ["t", "o", "h", "l", "c"]) {
+      if (typeof c[k] !== "number" || !Number.isFinite(c[k])) throw new Error(`candle.${k} must be a finite number`);
+    }
+    if (c.v != null && (typeof c.v !== "number" || !Number.isFinite(c.v))) throw new Error("candle.v must be a finite number if provided");
+  }
+  return sortCandlesByTime(candles as Candle[]);
+}
+
+function buildMarkers(candles: Candle[], rsi14?: (number | null)[]): Marker[] {
+  const markers: Marker[] = [];
+  if (!rsi14) return markers;
+
+  // simple RSI threshold markers
+  for (let i = 0; i < rsi14.length; i++) {
+    const v = rsi14[i];
+    if (v == null) continue;
+    if (v <= 30) markers.push({ t: candles[i].t, panel: "rsi", kind: "buy", text: "RSI <= 30" });
+    if (v >= 70) markers.push({ t: candles[i].t, panel: "rsi", kind: "sell", text: "RSI >= 70" });
+  }
+  return markers;
+}
+
+export default {
+  async fetch(request: Request): Promise<Response> {
+    if (request.method === "OPTIONS") return jsonResponse({ ok: true });
+
+    const url = new URL(request.url);
+    if (request.method === "GET" && url.pathname === "/") {
+      return new Response("ta-chart-api ok", { status: 200 });
+    }
+
+    if (request.method !== "POST" || url.pathname !== "/chart") {
+      return new Response("Not found", { status: 404 });
+    }
+
+    let body: ChartRequest;
+    try {
+      body = await request.json();
+    } catch {
+      return badRequest("Invalid JSON");
+    }
+
+    try {
+      const candles = validateCandles((body as any).candles);
+      const closes = closesFromCandles(candles);
+
+      const series: Series[] = [
+        { type: "candles", name: "price", panel: "price", data: candles },
+      ];
+
+      // volume panel if present
+      if (candles.some(c => typeof c.v === "number")) {
+        series.push({
+          type: "hist",
+          name: "volume",
+          panel: "volume",
+          data: candles.map(c => ({ t: c.t, value: typeof c.v === "number" ? c.v : null })),
+        });
+      }
+
+      const reqs = body.indicators ?? [];
+      let rsi14: (number | null)[] | undefined;
+
+      for (const r of reqs) {
+        if (r.type === "ema") series.push(toLine(candles, ema(closes, r.length), `EMA${r.length}`, "price"));
+        if (r.type === "sma") series.push(toLine(candles, sma(closes, r.length), `SMA${r.length}`, "price"));
+
+        if (r.type === "rsi") {
+          const vals = rsiFromCloses(closes, r.length);
+          series.push(toLine(candles, vals, `RSI${r.length}`, "rsi"));
+          if (r.length === 14) rsi14 = vals;
+        }
+
+        if (r.type === "bbands") {
+          const b = bbands(closes, r.length, r.mult);
+          series.push(toLine(candles, b.mid, `BB.mid(${r.length})`, "price"));
+          series.push(toLine(candles, b.upper, `BB.upper(${r.length},${r.mult})`, "price"));
+          series.push(toLine(candles, b.lower, `BB.lower(${r.length},${r.mult})`, "price"));
+        }
+
+        if (r.type === "macd") {
+          const m = macd(closes, r.fast, r.slow, r.signal);
+          series.push(toLine(candles, m.line, `MACD(${r.fast},${r.slow})`, "macd"));
+          series.push(toLine(candles, m.signal, `MACD.signal(${r.signal})`, "macd"));
+          series.push({
+            type: "hist",
+            name: "MACD.hist",
+            panel: "macd",
+            data: candles.map((c, i) => ({ t: c.t, value: m.hist[i] ?? null })),
+          });
+        }
+      }
+
+      const markers = buildMarkers(candles, rsi14);
+
+      const out: ChartResponse = {
+        meta: { symbol: body.symbol, timeframe: body.timeframe, points: candles.length },
+        series,
+        markers,
+      };
+
+      return jsonResponse(out);
+    } catch (e: any) {
+      return badRequest(e?.message ?? "Bad request");
+    }
+  },
+};
