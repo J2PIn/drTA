@@ -130,7 +130,7 @@ async function exportCombinedPng() {
   const h = imgPrice.naturalHeight;
 
   const gap = 24;
-  const header = 72;
+  const header = 120;
 
   const outW = w * 2 + gap * 3;
   const outH = header + h * 2 + gap * 3;
@@ -146,6 +146,18 @@ async function exportCombinedPng() {
   // header text
   const symbol = lastRequest?.symbol ?? lastSpec?.meta?.symbol ?? "CHART";
   const tf = lastRequest?.timeframe ?? lastSpec?.meta?.timeframe ?? "";
+  const indicators = Array.isArray(lastRequest?.indicators) ? lastRequest.indicators : [];
+  const indicatorText = indicators.length
+  ? indicators.map((x: any) => {
+      if (!x?.type) return "unknown";
+      if (x.type === "ema") return `EMA${x.length}`;
+      if (x.type === "sma") return `SMA${x.length}`;
+      if (x.type === "rsi") return `RSI${x.length}`;
+      if (x.type === "bbands") return `BB(${x.length},${x.mult})`;
+      if (x.type === "macd") return `MACD(${x.fast},${x.slow},${x.signal})`;
+      return String(x.type);
+    }).join("  ·  ")
+  : "";
   ctx.fillStyle = "#e6edf3";
   ctx.font = "600 24px system-ui, -apple-system, Segoe UI, Roboto, sans-serif";
   ctx.fillText(`${symbol} ${tf}`.trim(), gap, 42);
@@ -153,6 +165,31 @@ async function exportCombinedPng() {
   ctx.fillStyle = "#9fb0c3";
   ctx.font = "14px system-ui, -apple-system, Segoe UI, Roboto, sans-serif";
   ctx.fillText(`Generated: ${new Date().toLocaleString()}`, gap, 64);
+  if (indicatorText) {
+    ctx.fillStyle = "#9fb0c3";
+    ctx.font = "14px system-ui, -apple-system, Segoe UI, Roboto, sans-serif";
+  
+    // simple wrap into max 2 lines
+    const maxWidth = outW - gap * 2;
+    const words = indicatorText.split(" ");
+    let line = "";
+    let y = 88;
+    let lines = 0;
+  
+    for (const w of words) {
+      const test = line ? `${line} ${w}` : w;
+      if (ctx.measureText(test).width > maxWidth && line) {
+        ctx.fillText(line, gap, y);
+        line = w;
+        y += 18;
+        lines++;
+        if (lines >= 1) break; // max 2 lines total
+      } else {
+        line = test;
+      }
+    }
+    if (line && lines < 2) ctx.fillText(line, gap, y);
+  }
 
   const x1 = gap;
   const x2 = gap * 2 + w;
@@ -164,6 +201,17 @@ async function exportCombinedPng() {
   ctx.drawImage(imgVol, x2, y1);
   ctx.drawImage(imgRsi, x1, y2);
   ctx.drawImage(imgMacd, x2, y2);
+
+  // watermark
+  ctx.save();
+  ctx.globalAlpha = 0.55;
+  ctx.fillStyle = "#e6edf3";
+  ctx.font = "700 18px system-ui, -apple-system, Segoe UI, Roboto, sans-serif";
+  const wm = "drTA";
+  const pad = 14;
+  const wmw = ctx.measureText(wm).width;
+  ctx.fillText(wm, outW - pad - wmw, outH - pad);
+  ctx.restore();
 
   const pngUrl = canvas.toDataURL("image/png");
 
