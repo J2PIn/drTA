@@ -134,3 +134,49 @@ export function macd(values: (number | null)[], fast: number, slow: number, sign
 export function closesFromCandles(candles: Candle[]): (number | null)[] {
   return candles.map(c => c.c);
 }
+
+export function rollingTrend(values: (number | null)[], length: number) {
+  const slopePct: (number | null)[] = Array(values.length).fill(null);
+  const r2: (number | null)[] = Array(values.length).fill(null);
+
+  // x = 0..length-1 constants
+  const n = length;
+  const sumX = (n - 1) * n / 2;
+  const sumX2 = (n - 1) * n * (2 * n - 1) / 6;
+  const denom = n * sumX2 - sumX * sumX;
+
+  for (let i = length - 1; i < values.length; i++) {
+    const window = values.slice(i - length + 1, i + 1);
+    if (window.some(v => v == null)) continue;
+
+    const y = window as number[];
+    const sumY = y.reduce((a, b) => a + b, 0);
+    const meanY = sumY / n;
+
+    let sumXY = 0;
+    for (let k = 0; k < n; k++) sumXY += k * y[k];
+
+    // linear regression: y = a + b x
+    const b = (n * sumXY - sumX * sumY) / denom;
+
+    // R^2
+    const a = meanY - b * (sumX / n);
+    let ssTot = 0;
+    let ssRes = 0;
+    for (let k = 0; k < n; k++) {
+      const yHat = a + b * k;
+      ssTot += (y[k] - meanY) ** 2;
+      ssRes += (y[k] - yHat) ** 2;
+    }
+    const r2v = ssTot === 0 ? 0 : 1 - ssRes / ssTot;
+
+    // normalize slope into % per bar relative to last value
+    const last = y[n - 1];
+    const slopePctPerBar = last === 0 ? 0 : (b / last) * 100;
+
+    slopePct[i] = slopePctPerBar;
+    r2[i] = r2v;
+  }
+
+  return { slopePct, r2 };
+}
