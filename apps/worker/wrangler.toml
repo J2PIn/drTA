@@ -1,0 +1,6 @@
+name = "ta-chart-api"
+main = "src/index.ts"
+compatibility_date = "2026-03-02"
+
+[observability]
+enabled = true
