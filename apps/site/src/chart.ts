@@ -4,11 +4,11 @@ type Panel = "price" | "volume" | "rsi" | "macd";
 
 export function renderPanel(domId: string, spec: any, panel: Panel) {
   const el = document.getElementById(domId)!;
-  const chart = echarts.init(el);
+  const chart = echarts.getInstanceByDom(el) ?? echarts.init(el);
 
   const series = (spec.series ?? []).filter((s: any) => (s.panel ?? "price") === panel);
 
-  // x axis
+  // x axis labels from candle timestamps
   const times = (spec.series?.find((s: any) => s.type === "candles")?.data ?? []).map((c: any) => c.t);
 
   const eSeries: any[] = [];
@@ -50,5 +50,12 @@ export function renderPanel(domId: string, spec: any, panel: Panel) {
     series: eSeries,
   });
 
-  window.addEventListener("resize", () => chart.resize());
+  // avoid stacking multiple resize listeners
+  (chart as any).__resizeBound ??= (() => chart.resize());
+  if (!(chart as any).__resizeAttached) {
+    window.addEventListener("resize", (chart as any).__resizeBound);
+    (chart as any).__resizeAttached = true;
+  }
+
+  return chart;
 }
