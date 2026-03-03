@@ -6,6 +6,7 @@ export type IndicatorRequest =
   | { type: "rsi"; length: number }
   | { type: "bbands"; length: number; mult: number }
   | { type: "macd"; fast: number; slow: number; signal: number };
+  | { type: "trend"; length: number; r2Min?: number; slopeMin?: number };
 
 export type ChartRequest = {
   symbol?: string;
@@ -22,7 +23,7 @@ export type Series =
 export type Marker = { t: number; panel: "price" | "rsi" | "macd"; text: string; kind: "info" | "buy" | "sell" };
 
 export type ChartResponse = {
-  meta: { symbol?: string; timeframe?: string; points: number };
+  meta: { symbol?: string; timeframe?: string; points: number; analysis?: any };
   series: Series[];
   markers: Marker[];
 };
