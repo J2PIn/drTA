@@ -47,7 +47,7 @@ function buildMarkers(candles: Candle[], rsi14?: (number | null)[], mode: "busin
   const markers = buildMarkers(candles, rsi14, mode);
   if (!rsi14) return markers;
 
-  // simple RSI threshold markers
+  // simple RSI threshold markers 
   for (let i = 0; i < rsi14.length; i++) {
     const v = rsi14[i];
     if (v == null) continue;
