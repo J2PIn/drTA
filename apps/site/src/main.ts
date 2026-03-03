@@ -1,9 +1,14 @@
 import "./style.css";
 import { renderPanel } from "./chart";
 
+const exportBtn = document.getElementById("export") as HTMLButtonElement;
 const inputEl = document.getElementById("input") as HTMLTextAreaElement;
 const apiEl = document.getElementById("api") as HTMLInputElement;
 const runBtn = document.getElementById("run") as HTMLButtonElement;
+
+let lastSpec: any = null;
+let lastRequest: any = null;
+let charts: any = {};
 
 apiEl.value = "http://127.0.0.1:8787"; // local wrangler dev default
 
