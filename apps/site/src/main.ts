@@ -50,6 +50,7 @@ async function run() {
   let body: any;
   try {
     body = JSON.parse(inputEl.value);
+    lastRequest = body;
   } catch (e) {
     alert("Invalid JSON in input box");
     return;
@@ -67,14 +68,116 @@ async function run() {
     alert(data?.error ?? "API error");
     return;
   }
-
-  renderPanel("price", data, "price");
-  renderPanel("volume", data, "volume");
-  renderPanel("rsi", data, "rsi");
-  renderPanel("macd", data, "macd");
+  lastSpec = data;
+  
+  charts.price = renderPanel("price", data, "price");
+  charts.volume = renderPanel("volume", data, "volume");
+  charts.rsi = renderPanel("rsi", data, "rsi");
+  charts.macd = renderPanel("macd", data, "macd");
 }
 
 runBtn.onclick = run;
 
 // initial render
 run();
+
+function chartToDataUrl(chart: any): string {
+  // white background so PNG looks good when shared (not transparent)
+  return chart.getDataURL({
+    type: "png",
+    pixelRatio: 2,
+    backgroundColor: "#0b0f14",
+  });
+}
+
+function loadImage(dataUrl: string): Promise<HTMLImageElement> {
+  return new Promise((resolve, reject) => {
+    const img = new Image();
+    img.onload = () => resolve(img);
+    img.onerror = reject;
+    img.src = dataUrl;
+  });
+}
+
+async function exportCombinedPng() {
+  if (!lastSpec || !charts.price || !charts.volume || !charts.rsi || !charts.macd) {
+    alert("Generate a chart first.");
+    return;
+  }
+
+  // Make sure charts are fully laid out
+  charts.price.resize();
+  charts.volume.resize();
+  charts.rsi.resize();
+  charts.macd.resize();
+
+  const urls = {
+    price: chartToDataUrl(charts.price),
+    volume: chartToDataUrl(charts.volume),
+    rsi: chartToDataUrl(charts.rsi),
+    macd: chartToDataUrl(charts.macd),
+  };
+
+  const [imgPrice, imgVol, imgRsi, imgMacd] = await Promise.all([
+    loadImage(urls.price),
+    loadImage(urls.volume),
+    loadImage(urls.rsi),
+    loadImage(urls.macd),
+  ]);
+
+  // Assume all panels are same size as rendered
+  const w = imgPrice.naturalWidth;
+  const h = imgPrice.naturalHeight;
+
+  const gap = 24;
+  const header = 72;
+
+  const outW = w * 2 + gap * 3;
+  const outH = header + h * 2 + gap * 3;
+
+  const canvas = document.createElement("canvas");
+  canvas.width = outW;
+  canvas.height = outH;
+
+  const ctx = canvas.getContext("2d")!;
+  ctx.fillStyle = "#0b0f14";
+  ctx.fillRect(0, 0, outW, outH);
+
+  // header text
+  const symbol = lastRequest?.symbol ?? lastSpec?.meta?.symbol ?? "CHART";
+  const tf = lastRequest?.timeframe ?? lastSpec?.meta?.timeframe ?? "";
+  ctx.fillStyle = "#e6edf3";
+  ctx.font = "600 24px system-ui, -apple-system, Segoe UI, Roboto, sans-serif";
+  ctx.fillText(`${symbol} ${tf}`.trim(), gap, 42);
+
+  ctx.fillStyle = "#9fb0c3";
+  ctx.font = "14px system-ui, -apple-system, Segoe UI, Roboto, sans-serif";
+  ctx.fillText(`Generated: ${new Date().toLocaleString()}`, gap, 64);
+
+  const x1 = gap;
+  const x2 = gap * 2 + w;
+  const y1 = header + gap;
+  const y2 = header + gap * 2 + h;
+
+  // draw panels
+  ctx.drawImage(imgPrice, x1, y1);
+  ctx.drawImage(imgVol, x2, y1);
+  ctx.drawImage(imgRsi, x1, y2);
+  ctx.drawImage(imgMacd, x2, y2);
+
+  const pngUrl = canvas.toDataURL("image/png");
+
+  const a = document.createElement("a");
+  const safeSym = String(symbol).replace(/[^a-z0-9_-]+/gi, "_");
+  const safeTf = String(tf).replace(/[^a-z0-9_-]+/gi, "_");
+  a.download = `drTA_${safeSym}${safeTf ? "_" + safeTf : ""}.png`;
+  a.href = pngUrl;
+  a.click();
+}
+
+exportBtn.onclick = () => {
+  exportCombinedPng().catch((e) => {
+    console.error(e);
+    alert("Export failed. Check console.");
+  });
+};
