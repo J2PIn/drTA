@@ -11,6 +11,26 @@ function toLine(candles: Candle[], values: (number | null)[], name: string, pane
   };
 }
 
+if (!body.candles && Array.isArray((body as any).series)) {
+  const s = (body as any).series.sort((a:any,b:any)=>a.t-b.t);
+  const candles = [];
+
+  for (let i = 1; i < s.length; i++) {
+    const prev = s[i-1].value;
+    const curr = s[i].value;
+
+    candles.push({
+      t: s[i].t,
+      o: prev,
+      h: Math.max(prev, curr),
+      l: Math.min(prev, curr),
+      c: curr
+    });
+  }
+
+  body.candles = candles;
+}
+
 function validateCandles(candles: any): Candle[] {
   if (!Array.isArray(candles) || candles.length < 2) throw new Error("candles must be an array with at least 2 points");
   for (const c of candles) {
@@ -23,16 +43,35 @@ function validateCandles(candles: any): Candle[] {
   return sortCandlesByTime(candles as Candle[]);
 }
 
-function buildMarkers(candles: Candle[], rsi14?: (number | null)[]): Marker[] {
-  const markers: Marker[] = [];
+function buildMarkers(candles: Candle[], rsi14?: (number | null)[], mode: "business" | "market" = "market"): Marker[]
+  const markers = buildMarkers(candles, rsi14, mode);
   if (!rsi14) return markers;
 
   // simple RSI threshold markers
   for (let i = 0; i < rsi14.length; i++) {
     const v = rsi14[i];
     if (v == null) continue;
-    if (v <= 30) markers.push({ t: candles[i].t, panel: "rsi", kind: "buy", text: "RSI <= 30" });
-    if (v >= 70) markers.push({ t: candles[i].t, panel: "rsi", kind: "sell", text: "RSI >= 70" });
+    if (v <= 30) {
+      markers.push({
+        t: candles[i].t,
+        panel: "rsi",
+        kind: "buy",
+        text: mode === "business"
+          ? "Momentum exhaustion (possible rebound)"
+          : "RSI <= 30",
+      });
+    }
+    
+    if (v >= 70) {
+      markers.push({
+        t: candles[i].t,
+        panel: "rsi",
+        kind: "sell",
+        text: mode === "business"
+          ? "Overextension risk"
+          : "RSI >= 70",
+      });
+    }
   }
   return markers;
 }
@@ -57,25 +96,55 @@ export default {
       return badRequest("Invalid JSON");
     }
 
+
+    // If no candles provided but generic series is provided,
+      // convert series into synthetic candles
+      if (!body.candles && Array.isArray(body.series)) {
+        const s = body.series
+          .filter((x: any) => typeof x?.t === "number" && typeof x?.value === "number")
+          .sort((a: any, b: any) => a.t - b.t);
+      
+        const synthetic: any[] = [];
+      
+        for (let i = 1; i < s.length; i++) {
+          const prev = s[i - 1].value;
+          const curr = s[i].value;
+      
+          synthetic.push({
+            t: s[i].t,
+            o: prev,
+            h: Math.max(prev, curr),
+            l: Math.min(prev, curr),
+            c: curr,
+          });
+        }
+      
+        body.candles = synthetic;
+      }
+
     try {
       const candles = validateCandles((body as any).candles);
       const closes = closesFromCandles(candles);
 
+      const primaryName = mode === "business" ? "KPI" : "price";
+
       const series: Series[] = [
-        { type: "candles", name: "price", panel: "price", data: candles },
+        { type: "candles", name: primaryName, panel: "price", data: candles },
       ];
 
       // volume panel if present
-      if (candles.some(c => typeof c.v === "number")) {
+      const volumeName = mode === "business" ? "activity" : "volume";
+
         series.push({
           type: "hist",
-          name: "volume",
+          name: volumeName,
           panel: "volume",
           data: candles.map(c => ({ t: c.t, value: typeof c.v === "number" ? c.v : null })),
         });
       }
 
       const reqs = body.indicators ?? [];
+      const mode = body.mode === "business" ? "business" : "market";
       let rsi14: (number | null)[] | undefined;
 
       for (const r of reqs) {
